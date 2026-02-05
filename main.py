@@ -12,6 +12,8 @@ from telegram.ext import (
 )
 import os
 import itertools
+import random
+import string
 from io import BytesIO
 
 # ================= ENV =================
@@ -19,8 +21,6 @@ TOKEN = os.environ.get("BOT_TOKEN")
 GROUP_ID = int(os.environ.get("GROUP_ID"))
 
 # ================= STORAGE (IN-MEMORY) =================
-ticket_counter = itertools.count(10000)
-
 user_active_ticket = {}          # user_id -> ticket_id
 ticket_status = {}               # ticket_id -> status
 ticket_user = {}                 # ticket_id -> user_id
@@ -31,8 +31,10 @@ group_message_map = {}           # group_msg_id -> ticket_id
 
 
 # ================= HELPERS =================
-def generate_ticket_id():
-    return f"BV-{next(ticket_counter)}"
+def generate_ticket_id(length=8):
+    chars = string.ascii_letters + string.digits + "*#@$&"
+    random_part = "".join(random.choice(chars) for _ in range(length))
+    return f"BV-{random_part}"
 
 def ticket_header(ticket_id, status):
     return f"🎫 Ticket ID: {ticket_id}\nStatus: {status}\n\n"
@@ -177,7 +179,7 @@ async def group_reply(update: Update, context):
         )
 
 
-# ================= /close BV-XXXXX or reply =================
+# ================= /close =================
 async def close_ticket(update: Update, context):
     if update.effective_chat.id != GROUP_ID:
         return
@@ -190,16 +192,16 @@ async def close_ticket(update: Update, context):
     else:
         if not update.message.reply_to_message:
             await update.message.reply_text(
-                "Usage:\n/close BV-XXXXX\nor reply to a ticket message with /close"
+                "Usage:\n/close BV-XXXXX\nor reply with /close"
             )
             return
         reply_id = update.message.reply_to_message.message_id
         if reply_id not in group_message_map:
-            await update.message.reply_text("❌ Ticket not found in reply.")
+            await update.message.reply_text("❌ Ticket not found.")
             return
         ticket_id = group_message_map[reply_id]
 
-    user_id = ticket_user.get(ticket_id)
+    user_id = ticket_user[ticket_id]
     ticket_status[ticket_id] = "Closed"
     user_active_ticket.pop(user_id, None)
 
@@ -214,7 +216,7 @@ async def close_ticket(update: Update, context):
     await update.message.reply_text(f"✅ Ticket {ticket_id} closed.")
 
 
-# ================= /open BV-XXXXX =================
+# ================= /open =================
 async def open_ticket(update: Update, context):
     if update.effective_chat.id != GROUP_ID:
         return
@@ -230,7 +232,7 @@ async def open_ticket(update: Update, context):
         return
 
     if ticket_status[ticket_id] != "Closed":
-        await update.message.reply_text("⚠️ Ticket is already open.")
+        await update.message.reply_text("⚠️ Ticket already open.")
         return
 
     ticket_status[ticket_id] = "Processing"
@@ -242,14 +244,13 @@ async def open_ticket(update: Update, context):
         text=(
             f"🎫 Ticket ID: {ticket_id}\n"
             "Status: Reopened\n\n"
-            "Your ticket has been reopened.\n"
             "You may continue the conversation."
         )
     )
     await update.message.reply_text(f"✅ Ticket {ticket_id} reopened.")
 
 
-# ================= /history BV-XXXXX =================
+# ================= /history =================
 async def history(update: Update, context):
     if update.effective_chat.id != GROUP_ID:
         return
@@ -274,10 +275,7 @@ async def history(update: Update, context):
     buffer.seek(0)
     buffer.name = f"{ticket_id}.txt"
 
-    await context.bot.send_document(
-        chat_id=GROUP_ID,
-        document=buffer
-    )
+    await context.bot.send_document(chat_id=GROUP_ID, document=buffer)
 
 
 # ================= /historyticket =================
@@ -311,27 +309,43 @@ async def historyticket(update: Update, context):
     await update.message.reply_text(text)
 
 
-# ================= /send @username | user_id <message> =================
+# ================= /send =================
 async def send_direct(update: Update, context):
     if update.effective_chat.id != GROUP_ID:
         return
 
     if len(context.args) < 2:
         await update.message.reply_text(
-            "Usage:\n/send @username <message>\n/send <user_id> <message>"
+            "Usage:\n"
+            "/send BV-XXXXX <message>\n"
+            "/send @username <message>\n"
+            "/send user_id <message>"
         )
         return
 
     target = context.args[0]
     message = " ".join(context.args[1:])
     user_id = None
+    ticket_id = None
 
-    if target.startswith("@"):
+    if target.startswith("BV-"):
+        ticket_id = target
+        if ticket_id not in ticket_status:
+            await update.message.reply_text("❌ Ticket not found.")
+            return
+        if ticket_status[ticket_id] == "Closed":
+            await update.message.reply_text("⚠️ Ticket is closed. Message not sent.")
+            return
+        user_id = ticket_user[ticket_id]
+
+    elif target.startswith("@"):
         username = target[1:]
         for tid, uname in ticket_username.items():
             if uname == username:
                 user_id = ticket_user[tid]
+                ticket_id = tid
                 break
+
     else:
         user_id = int(target)
 
@@ -339,11 +353,12 @@ async def send_direct(update: Update, context):
         await update.message.reply_text("❌ User not found.")
         return
 
-    await context.bot.send_message(
-        chat_id=user_id,
-        text=f"📩 BlockVeil Support:\n\n{message}"
-    )
-    await update.message.reply_text("✅ Message sent successfully.")
+    text = f"📩 BlockVeil Support:\n\n{message}"
+    if ticket_id:
+        text = f"🎫 Ticket ID: {ticket_id}\n\nBlockVeil Support:\n{message}"
+
+    await context.bot.send_message(chat_id=user_id, text=text)
+    await update.message.reply_text("✅ Message sent.")
 
 
 # ================= INIT =================
