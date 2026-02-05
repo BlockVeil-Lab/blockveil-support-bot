@@ -55,7 +55,7 @@ async def start(update: Update, context):
     await update.message.reply_text(
         "Hello Sir/Mam 👋\n\n"
         "Welcome to BlockVeil Support.\n"
-        "You can contact the BlockVeil team using this bot.\n\n"
+        "Use the button below to create a support ticket.\n\n"
         "🔐 Privacy Notice\n"
         "Your information is kept strictly confidential.\n\n"
         "📧 support.blockveil@protonmail.com\n\n"
@@ -164,21 +164,6 @@ async def group_reply(update: Update, context):
     ticket_id = group_message_map[reply_id]
     user_id = ticket_user[ticket_id]
 
-    # CLOSE TICKET
-    if update.message.text and update.message.text.strip() == "/close":
-        ticket_status[ticket_id] = "Closed"
-        user_active_ticket.pop(user_id, None)
-
-        await context.bot.send_message(
-            chat_id=user_id,
-            text=(
-                f"🎫 Ticket ID: {ticket_id}\n"
-                "Status: Closed\n\n"
-                "Thank you for contacting BlockVeil Support."
-            )
-        )
-        return
-
     prefix = f"🎫 Ticket ID: {ticket_id}\n\n"
     agent_name = "BlockVeil Support"
 
@@ -190,6 +175,78 @@ async def group_reply(update: Update, context):
         ticket_messages[ticket_id].append(
             (agent_name, update.message.text)
         )
+
+
+# ================= /close BV-XXXXX or reply =================
+async def close_ticket(update: Update, context):
+    if update.effective_chat.id != GROUP_ID:
+        return
+
+    if context.args:
+        ticket_id = context.args[0]
+        if ticket_id not in ticket_status:
+            await update.message.reply_text("❌ Ticket not found.")
+            return
+    else:
+        if not update.message.reply_to_message:
+            await update.message.reply_text(
+                "Usage:\n/close BV-XXXXX\nor reply to a ticket message with /close"
+            )
+            return
+        reply_id = update.message.reply_to_message.message_id
+        if reply_id not in group_message_map:
+            await update.message.reply_text("❌ Ticket not found in reply.")
+            return
+        ticket_id = group_message_map[reply_id]
+
+    user_id = ticket_user.get(ticket_id)
+    ticket_status[ticket_id] = "Closed"
+    user_active_ticket.pop(user_id, None)
+
+    await context.bot.send_message(
+        chat_id=user_id,
+        text=(
+            f"🎫 Ticket ID: {ticket_id}\n"
+            "Status: Closed\n\n"
+            "Thank you for contacting BlockVeil Support."
+        )
+    )
+    await update.message.reply_text(f"✅ Ticket {ticket_id} closed.")
+
+
+# ================= /open BV-XXXXX =================
+async def open_ticket(update: Update, context):
+    if update.effective_chat.id != GROUP_ID:
+        return
+
+    if not context.args:
+        await update.message.reply_text("Usage: /open BV-XXXXX")
+        return
+
+    ticket_id = context.args[0]
+
+    if ticket_id not in ticket_status:
+        await update.message.reply_text("❌ Ticket not found.")
+        return
+
+    if ticket_status[ticket_id] != "Closed":
+        await update.message.reply_text("⚠️ Ticket is already open.")
+        return
+
+    ticket_status[ticket_id] = "Processing"
+    user_id = ticket_user[ticket_id]
+    user_active_ticket[user_id] = ticket_id
+
+    await context.bot.send_message(
+        chat_id=user_id,
+        text=(
+            f"🎫 Ticket ID: {ticket_id}\n"
+            "Status: Reopened\n\n"
+            "Your ticket has been reopened.\n"
+            "You may continue the conversation."
+        )
+    )
+    await update.message.reply_text(f"✅ Ticket {ticket_id} reopened.")
 
 
 # ================= /history BV-XXXXX =================
@@ -260,12 +317,13 @@ async def send_direct(update: Update, context):
         return
 
     if len(context.args) < 2:
-        await update.message.reply_text("Usage: Send @username <message> OR Send <user_id> <message>")
+        await update.message.reply_text(
+            "Usage:\n/send @username <message>\n/send <user_id> <message>"
+        )
         return
 
     target = context.args[0]
     message = " ".join(context.args[1:])
-
     user_id = None
 
     if target.startswith("@"):
@@ -285,7 +343,6 @@ async def send_direct(update: Update, context):
         chat_id=user_id,
         text=f"📩 BlockVeil Support:\n\n{message}"
     )
-
     await update.message.reply_text("✅ Message sent successfully.")
 
 
@@ -293,6 +350,8 @@ async def send_direct(update: Update, context):
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("close", close_ticket))
+app.add_handler(CommandHandler("open", open_ticket))
 app.add_handler(CommandHandler("history", history))
 app.add_handler(CommandHandler("historyticket", historyticket))
 app.add_handler(CommandHandler("send", send_direct))
