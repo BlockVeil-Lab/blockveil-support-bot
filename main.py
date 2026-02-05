@@ -254,12 +254,48 @@ async def historyticket(update: Update, context):
     await update.message.reply_text(text)
 
 
+# ================= /send @username | user_id <message> =================
+async def send_direct(update: Update, context):
+    if update.effective_chat.id != GROUP_ID:
+        return
+
+    if len(context.args) < 2:
+        await update.message.reply_text("Usage: Send @username <message> OR Send <user_id> <message>")
+        return
+
+    target = context.args[0]
+    message = " ".join(context.args[1:])
+
+    user_id = None
+
+    if target.startswith("@"):
+        username = target[1:]
+        for tid, uname in ticket_username.items():
+            if uname == username:
+                user_id = ticket_user[tid]
+                break
+    else:
+        user_id = int(target)
+
+    if not user_id:
+        await update.message.reply_text("❌ User not found.")
+        return
+
+    await context.bot.send_message(
+        chat_id=user_id,
+        text=f"📩 BlockVeil Support:\n\n{message}"
+    )
+
+    await update.message.reply_text("✅ Message sent successfully.")
+
+
 # ================= INIT =================
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("history", history))
 app.add_handler(CommandHandler("historyticket", historyticket))
+app.add_handler(CommandHandler("send", send_direct))
 app.add_handler(CallbackQueryHandler(create_ticket, pattern="create_ticket"))
 app.add_handler(MessageHandler(filters.ChatType.PRIVATE, user_message))
 app.add_handler(MessageHandler(filters.ChatType.GROUPS, group_reply))
