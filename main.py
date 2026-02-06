@@ -54,8 +54,11 @@ async def start(update: Update, context):
         [InlineKeyboardButton("🎟️ Create Ticket", callback_data="create_ticket")]
     ])
     await update.message.reply_text(
-        "Hello Sir/Mam 👋\n\n"
+        "Hey Sir/Mam 👋\n\n"
         "Welcome to BlockVeil Support.\n"
+        "You can contact the BlockVeil team using this bot.\n\n"
+        "🔐 Privacy Notice\n"
+        "Your information is kept strictly confidential.\n\n"
         "Use the button below to create a support ticket.\n\n"
         "📧 support.blockveil@protonmail.com\n\n"
         "— BlockVeil Support Team",
@@ -87,7 +90,8 @@ async def create_ticket(update: Update, context):
     await query.message.reply_text(
         f"🎫 Ticket Created: {code(ticket_id)}\n"
         "Status: Pending\n\n"
-        "Please send your message, photo, voice, video, or file.",
+        "Please write and submit your issue or suggestion here in a clear and concise manner.\n"
+        "Our support team will review it as soon as possible.",
         parse_mode="HTML"
     )
 
@@ -257,7 +261,7 @@ async def close_ticket(update: Update, context):
         text=f"🎫 Ticket ID: {code(ticket_id)}\nStatus: Closed",
         parse_mode="HTML"
     )
-    await update.message.reply_text(f"✅ Ticket {code(ticket_id)} closed.", parse_mode="HTML")
+    await update.message.reply_text(f" Ticket {code(ticket_id)} closed.", parse_mode="HTML")
 
 # ================= /send =================
 async def send_direct(update: Update, context):
@@ -267,6 +271,7 @@ async def send_direct(update: Update, context):
     if len(context.args) < 2:
         await update.message.reply_text(
             "Usage:\n"
+            "/send @all <message>\n"
             "/send BV-XXXXX <message>\n"
             "/send @username <message>\n"
             "/send user_id <message>",
@@ -276,6 +281,42 @@ async def send_direct(update: Update, context):
 
     target = context.args[0]
     message = html.escape(" ".join(context.args[1:]))
+    
+    # Handle @all broadcast
+    if target == "@all":
+        sent_count = 0
+        failed_count = 0
+        unique_users = set()
+        
+        # Get all unique users from ticket_user
+        for user_id in ticket_user.values():
+            unique_users.add(user_id)
+        
+        total_users = len(unique_users)
+        await update.message.reply_text(f"📢 Broadcasting to {total_users} users...", parse_mode="HTML")
+        
+        for user_id in unique_users:
+            try:
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=f"📢 Announcement from BlockVeil Support:\n\n{message}",
+                    parse_mode="HTML"
+                )
+                sent_count += 1
+            except Exception as e:
+                failed_count += 1
+                print(f"Failed to send to {user_id}: {e}")
+        
+        await update.message.reply_text(
+            f"📊 Broadcast Complete:\n"
+            f"✅ Sent: {sent_count}\n"
+            f"❌ Failed: {failed_count}\n"
+            f"👥 Total: {total_users}",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Handle individual messages (existing code)
     user_id = None
     ticket_id = None
 
@@ -316,7 +357,7 @@ async def send_direct(update: Update, context):
         text=f"📩 BlockVeil Support:\n\n{message}",
         parse_mode="HTML"
     )
-    await update.message.reply_text("✅ Message sent.", parse_mode="HTML")
+    await update.message.reply_text(" Message sent Successfully.", parse_mode="HTML")
 
 # ================= /open =================
 async def open_ticket(update: Update, context):
@@ -337,7 +378,7 @@ async def open_ticket(update: Update, context):
 
     ticket_status[ticket_id] = "Processing"
     user_active_ticket[ticket_user[ticket_id]] = ticket_id
-    await update.message.reply_text(f"✅ Ticket {code(ticket_id)} reopened.", parse_mode="HTML")
+    await update.message.reply_text(f" Ticket {code(ticket_id)} reopened.", parse_mode="HTML")
 
 # ================= /status =================
 async def status_ticket(update: Update, context):
