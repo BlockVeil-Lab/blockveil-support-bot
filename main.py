@@ -14,6 +14,8 @@ import os
 import random
 import string
 import html
+from io import BytesIO
+from datetime import datetime
 
 # ================= ENV =================
 TOKEN = os.environ.get("BOT_TOKEN")
@@ -27,6 +29,7 @@ ticket_username = {}
 ticket_messages = {}
 user_tickets = {}
 group_message_map = {}
+ticket_created_at = {}  # New: Track when ticket was created
 
 # ================= HELPERS =================
 def generate_ticket_id(length=8):
@@ -85,6 +88,7 @@ async def create_ticket(update: Update, context):
     ticket_user[ticket_id] = user.id
     ticket_username[ticket_id] = user.username or ""
     ticket_messages[ticket_id] = []
+    ticket_created_at[ticket_id] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     user_tickets.setdefault(user.id, []).append(ticket_id)
 
     await query.message.reply_text(
@@ -422,7 +426,7 @@ async def list_tickets(update: Update, context):
 
     await update.message.reply_text(text, parse_mode="HTML")
 
-# ================= /export =================
+# ================= /export (UPDATED FORMAT) =================
 async def export_ticket(update: Update, context):
     if update.effective_chat.id != GROUP_ID or not context.args:
         return
@@ -432,16 +436,15 @@ async def export_ticket(update: Update, context):
         await update.message.reply_text("❌ Ticket not found.", parse_mode="HTML")
         return
     
-    from io import BytesIO
     buf = BytesIO()
-    buf.write(f"Ticket ID: {ticket_id}\n".encode())
-    buf.write(f"Status: {ticket_status.get(ticket_id, 'Unknown')}\n".encode())
-    buf.write(f"User ID: {ticket_user.get(ticket_id, 'Unknown')}\n".encode())
-    buf.write(f"Username: @{ticket_username.get(ticket_id, 'Unknown')}\n".encode())
-    buf.write("-" * 50 + "\n".encode())
+    buf.write("BlockVeil Support Messages\n\n".encode())
     
     for sender, message in ticket_messages[ticket_id]:
-        buf.write(f"{sender}: {message}\n".encode())
+        if sender == "BlockVeil Support":
+            label = "blockveil support team"
+        else:
+            label = "user er username"
+        buf.write(f"{label} : {message}\n".encode())
     
     buf.seek(0)
     buf.name = f"{ticket_id}.txt"
@@ -478,6 +481,94 @@ async def ticket_history(update: Update, context):
     
     await update.message.reply_text(text, parse_mode="HTML")
 
+# ================= /user =================
+async def user_list(update: Update, context):
+    if update.effective_chat.id != GROUP_ID:
+        return
+    
+    buf = BytesIO()
+    seen_users = set()
+    count = 1
+    
+    # Iterate through all tickets to get unique users
+    for tid, user_id in ticket_user.items():
+        if user_id in seen_users:
+            continue
+            
+        seen_users.add(user_id)
+        username = ticket_username.get(tid, "N/A")
+        buf.write(f"{count} - @{username} - {user_id}\n".encode())
+        count += 1
+    
+    if count == 1:
+        await update.message.reply_text("❌ No users found.", parse_mode="HTML")
+        return
+    
+    buf.seek(0)
+    buf.name = "users_list.txt"
+    await context.bot.send_document(GROUP_ID, document=buf)
+
+# ================= /which =================
+async def which_user(update: Update, context):
+    if update.effective_chat.id != GROUP_ID or not context.args:
+        return
+    
+    target = context.args[0]
+    user_id = None
+    username = None
+    
+    # Determine target type
+    if target.startswith("@"):
+        # Username
+        username_target = target[1:]
+        for tid, uname in ticket_username.items():
+            if uname == username_target:
+                user_id = ticket_user[tid]
+                username = uname
+                break
+    
+    elif target.startswith("BV-"):
+        # Ticket ID
+        ticket_id = target
+        if ticket_id in ticket_user:
+            user_id = ticket_user[ticket_id]
+            username = ticket_username.get(ticket_id, "N/A")
+    
+    else:
+        # User ID
+        try:
+            user_id = int(target)
+            # Find username for this user_id
+            for tid, uid in ticket_user.items():
+                if uid == user_id:
+                    username = ticket_username.get(tid, "N/A")
+                    break
+        except:
+            pass
+    
+    if not user_id:
+        await update.message.reply_text("❌ User not found.", parse_mode="HTML")
+        return
+    
+    # Get all tickets for this user
+    user_ticket_list = user_tickets.get(user_id, [])
+    
+    if not user_ticket_list:
+        await update.message.reply_text("❌ No tickets found for this user.", parse_mode="HTML")
+        return
+    
+    # Prepare response
+    response = f"👤 <b>User Information</b>\n\n"
+    response += f"• User ID : {user_id}\n"
+    response += f"• Username : @{username or 'N/A'}\n\n"
+    response += f"📊 <b>Created total {len(user_ticket_list)} tickets.</b>\n\n"
+    
+    for i, ticket_id in enumerate(user_ticket_list, 1):
+        status = ticket_status.get(ticket_id, "Unknown")
+        response += f"{i}. {code(ticket_id)} - {status}\n"
+    
+    await update.message.reply_text(response, parse_mode="HTML")
+
 # ================= INIT =================
 app = ApplicationBuilder().token(TOKEN).build()
 
@@ -489,6 +580,8 @@ app.add_handler(CommandHandler("status", status_ticket))
 app.add_handler(CommandHandler("list", list_tickets))
 app.add_handler(CommandHandler("export", export_ticket))
 app.add_handler(CommandHandler("history", ticket_history))
+app.add_handler(CommandHandler("user", user_list))  # New
+app.add_handler(CommandHandler("which", which_user))  # New
 app.add_handler(CallbackQueryHandler(create_ticket, pattern="create_ticket"))
 app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, user_message))
 app.add_handler(MessageHandler(filters.ChatType.GROUPS & ~filters.COMMAND, group_reply))
